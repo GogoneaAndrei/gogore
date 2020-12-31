@@ -1,160 +1,163 @@
 #include "ore.h"
 
-#include <unistd.h> 
-#include <stdio.h> 
+#include <stdio.h>
+#include <stdlib.h>
 #include <sys/socket.h> 
-#include <stdlib.h> 
-#include <netinet/in.h> 
+#include <arpa/inet.h> 
+#include <unistd.h> 
 #include <string.h> 
 #define PORT 8081
 
-typedef struct
+typedef struct {
+    unsigned id;
+    unsigned salary;
+} employee;
+
+int employee_compare(const void *s1, const void *s2)
 {
-    byte* id_ctxt_buf;
-    byte* salary_ctxt_buf;
-} employee_ciphertext;
+    employee *e1 = (employee *)s1;
+    employee *e2 = (employee *)s2;
+    return e1->salary - e2->salary;
+}
+
+void sort_employees(employee* employees, int employees_count)
+{
+    qsort(employees, employees_count, sizeof(employee), employee_compare);
+}
 
 int init_socket()
 {
-    int server_fd, new_socket;
-    struct sockaddr_in address; 
-    int opt = 1; 
-    int addrlen = sizeof(address);
-
-    // Creating socket file descriptor 
-    if ((server_fd = socket(AF_INET, SOCK_STREAM, 0)) == 0) 
+    int sock = 0;
+    struct sockaddr_in serv_addr;
+    if ((sock = socket(AF_INET, SOCK_STREAM, 0)) < 0) 
     { 
-        perror("socket failed"); 
-        exit(EXIT_FAILURE); 
+        printf("\n Socket creation error \n"); 
+        return -1; 
     } 
-
-    // Forcefully attaching socket to the port 8080 
-    if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, 
-                                                  &opt, sizeof(opt))) 
+    serv_addr.sin_family = AF_INET; 
+    serv_addr.sin_port = htons(PORT);
+    if (connect(sock, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) 
     { 
-        perror("setsockopt"); 
-        exit(EXIT_FAILURE); 
-    } 
-    address.sin_family = AF_INET; 
-    address.sin_addr.s_addr = INADDR_ANY; 
-    address.sin_port = htons( PORT ); 
-
-    // Forcefully attaching socket to the port 8080 
-    if (bind(server_fd, (struct sockaddr *)&address,  
-                                 sizeof(address))<0) 
-    { 
-        perror("bind failed"); 
-        exit(EXIT_FAILURE); 
+        printf("\nConnection Failed \n"); 
+        return -1; 
     }
-
-    if (listen(server_fd, 3) < 0) 
-    { 
-        perror("listen"); 
-        exit(EXIT_FAILURE); 
-    }
-
-    if ((new_socket = accept(server_fd, (struct sockaddr *)&address,  
-                       (socklen_t*)&addrlen))<0) 
-    { 
-        perror("accept"); 
-        exit(EXIT_FAILURE); 
-    }
-
-    return new_socket;
+    return sock;
 }
 
-int setup(employee_ciphertext* employee_ciphertexts)
+int setup(ore_secret_key sk, ore_params params, employee* employees, int employees_count)
 {
-    int size, valread, new_socket, employees_count, i;
+    int i, sock;
+    ore_ciphertext id_ctxt, salary_ctxt;
 
-    new_socket = init_socket();
+    printf("Generating secret key...\n");
+    int err = ore_setup(sk, params);
+    printf("Secret key generated...\n");
+    
+    if (err != ERROR_NONE) {
+        return err;
+    }
 
-    valread = read( new_socket , &employees_count, sizeof(employees_count));
-    printf("Employees count received...\n");
+    err = init_ore_ciphertext(id_ctxt, params);
+    if (err != ERROR_NONE) {
+        return err;
+    }
+    err = init_ore_ciphertext(salary_ctxt, params);
+    if (err != ERROR_NONE) {
+        return err;
+    }
+
+    printf("Sorting employees...\n");
+    sort_employees(employees, employees_count);
+    printf("Employees are sorted...\n");
+
+    sock = init_socket();
+    if (sock == -1) {
+        printf("ERROR Encountered");
+        return -1;
+    }
+
+    printf("Sending employees count to server...\n");
+    send(sock , &employees_count, sizeof(employees_count), 0);
     #ifdef DEBUG
-        printf("Bytes read: %d\n", valread);
         printf("Employees count: %d\n", employees_count);
     #endif
-    if (valread != sizeof(employees_count))
-    {
-        printf("Read only %d from %lu\n", valread, sizeof(employees_count));
-        return -1;
-    }
-
-    valread = read( new_socket , &size, sizeof(size));
-    printf("Ciphertext size received...\n");
+    printf("Employees count sent...\n");
     #ifdef DEBUG
-        printf("Bytes read: %d\n", valread);
-        printf("Ciphertext size: %d \n", size);
+        printf("Ciphertext size: %d \n", ore_ciphertext_size(params));
     #endif
-    if (valread != sizeof(size))
-    {
-        printf("Read only %d from %lu\n", valread, sizeof(size));
-        return -1;
-    }
+    int size = ore_ciphertext_size(params);
+    printf("Sending ciphertext size to server...\n");
+    send(sock , &size, sizeof(size), 0);
+    printf("Ciphertext size sent...\n");
 
-    employee_ciphertexts = calloc(sizeof(employee_ciphertext), employees_count);
-    
-    printf("Start receiving employee ciphertexts...\n");
+    printf("Sending ciphertexts...\n");
+
     for(i = 0; i < employees_count; i++)
     {
-        employee_ciphertexts[i].id_ctxt_buf = calloc(sizeof(byte), size);
-        employee_ciphertexts[i].salary_ctxt_buf = calloc(sizeof(byte), size);
-        valread = read( new_socket , employee_ciphertexts[i].id_ctxt_buf, size);
+        ore_encrypt_ui(id_ctxt, sk, employees[i].id);
+        ore_encrypt_ui(salary_ctxt, sk, employees[i].salary);
+
         #ifdef DEBUG
-            printf("Bytes read: %d\n", valread);
             printf("ID ciphertext: ");
             for (int j=0; j < size; ++j )
             {
-                printf("%02x", employee_ciphertexts[i].id_ctxt_buf[j]);
+                printf("%02x", id_ctxt->buf[j]);
             }
             printf("\n");
-        #endif
-        if (valread != size)
-        {
-            printf("Read only %d from %d\n", valread, size);
-            return -1;
-        }
-        valread = read( new_socket , employee_ciphertexts[i].salary_ctxt_buf, size);
-        #ifdef DEBUG
-            printf("Bytes read: %d\n", valread);
             printf("Salary ciphertext: ");
             for (int j=0; j < size; ++j )
             {
-                printf("%02x", employee_ciphertexts[i].salary_ctxt_buf[j]);
+                printf("%02x", salary_ctxt->buf[j]);
             }
             printf("\n");
         #endif
-        if (valread != size)
-        {
-            printf("Read only %d from %d\n", valread, size);
-            return -1;
-        }
+        send(sock , id_ctxt->buf, size, 0);
+        send(sock , salary_ctxt->buf, size, 0);
     }
-    printf("Employee ciphertexts received...\n");
 
-    shutdown(new_socket, 2);
+    printf("Ciphertexts sent...\n");
 
     return ERROR_NONE;
 }
 
-void free_employee_ciphetexts(employee_ciphertext* employee_ciphertexts)
-{
-    int employees_count = sizeof(employee_ciphertexts)/sizeof(employee_ciphertexts[0]);
-    for(int i = 0; i < employees_count; i++)
-    {
-        free(employee_ciphertexts[i].id_ctxt_buf);
-        free(employee_ciphertexts[i].salary_ctxt_buf);
-    }
-    free(employee_ciphertexts);
-}
+// int range(ore_secret_key sk, int range_min, int range_max)
+// {
+//     sock = init_socket();
+//     if (sock == -1) {
+//         printf("ERROR Encountered");
+//         return -1;
+//     }
+
+//     return ERROR_NONE;
+// }
 
 int main()
 {
-    employee_ciphertext* employee_ciphertexts = NULL;
-    printf("Running server setup...\n");
-    setup(employee_ciphertexts);
-    printf("Server setup finished...\n");
-    free_employee_ciphetexts(employee_ciphertexts);
+    FILE* fd;
+    int i, employees_count = 0;
+    employee* employees = NULL;
+    int nbits = 31;
+    int out_blk_len = ((rand() % (nbits - 2)) + 2);
+
+    fd = fopen ("employees","r");
+    if (fd != NULL)
+    {
+        fscanf(fd, "%d", &employees_count);
+        employees = malloc(employees_count * sizeof(employee));
+        for(i = 0; i < employees_count; i++)
+        {
+            fscanf(fd, "%d", &employees[i].salary);
+            employees[i].id = i;
+        }
+        fclose(fd);
+    }
+
+    ore_params params;
+    init_ore_params(params, nbits, out_blk_len);
+    ore_secret_key sk;
+
+    printf("Running client setup...\n");
+    setup(sk, params, employees, employees_count);
+    printf("Client setup finished...\n");
     return 0;
 }
