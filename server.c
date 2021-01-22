@@ -14,6 +14,9 @@ typedef struct
     byte* salary_ctxt_buf;
 } employee_ciphertext;
 
+int ciphertext_size;
+ore_params params;
+
 int init_socket()
 {
     int server_fd, new_socket;
@@ -65,7 +68,7 @@ int init_socket()
 
 int setup(employee_ciphertext* employee_ciphertexts)
 {
-    int size, valread, new_socket, employees_count, i;
+    int valread, new_socket, employees_count, i;
 
     new_socket = init_socket();
 
@@ -81,15 +84,15 @@ int setup(employee_ciphertext* employee_ciphertexts)
         return -1;
     }
 
-    valread = read( new_socket , &size, sizeof(size));
+    valread = read( new_socket , &ciphertext_size, sizeof(ciphertext_size));
     printf("Ciphertext size received...\n");
     #ifdef DEBUG
         printf("Bytes read: %d\n", valread);
-        printf("Ciphertext size: %d \n", size);
+        printf("Ciphertext size: %d \n", ciphertext_size);
     #endif
-    if (valread != sizeof(size))
+    if (valread != sizeof(ciphertext_size))
     {
-        printf("Read only %d from %lu\n", valread, sizeof(size));
+        printf("Read only %d from %lu\n", valread, sizeof(ciphertext_size));
         return -1;
     }
 
@@ -98,42 +101,138 @@ int setup(employee_ciphertext* employee_ciphertexts)
     printf("Start receiving employee ciphertexts...\n");
     for(i = 0; i < employees_count; i++)
     {
-        employee_ciphertexts[i].id_ctxt_buf = calloc(sizeof(byte), size);
-        employee_ciphertexts[i].salary_ctxt_buf = calloc(sizeof(byte), size);
-        valread = read( new_socket , employee_ciphertexts[i].id_ctxt_buf, size);
+        employee_ciphertexts[i].id_ctxt_buf = calloc(sizeof(byte), ciphertext_size);
+        employee_ciphertexts[i].salary_ctxt_buf = calloc(sizeof(byte), ciphertext_size);
+        valread = read( new_socket , employee_ciphertexts[i].id_ctxt_buf, ciphertext_size);
         #ifdef DEBUG
             printf("Bytes read: %d\n", valread);
             printf("ID ciphertext: ");
-            for (int j=0; j < size; ++j )
+            for (int j=0; j < ciphertext_size; ++j )
             {
                 printf("%02x", employee_ciphertexts[i].id_ctxt_buf[j]);
             }
             printf("\n");
         #endif
-        if (valread != size)
+        if (valread != ciphertext_size)
         {
-            printf("Read only %d from %d\n", valread, size);
+            printf("Read only %d from %d\n", valread, ciphertext_size);
             return -1;
         }
-        valread = read( new_socket , employee_ciphertexts[i].salary_ctxt_buf, size);
+        valread = read( new_socket , employee_ciphertexts[i].salary_ctxt_buf, ciphertext_size);
         #ifdef DEBUG
             printf("Bytes read: %d\n", valread);
             printf("Salary ciphertext: ");
-            for (int j=0; j < size; ++j )
+            for (int j=0; j < ciphertext_size; ++j )
             {
                 printf("%02x", employee_ciphertexts[i].salary_ctxt_buf[j]);
             }
             printf("\n");
         #endif
-        if (valread != size)
+        if (valread != ciphertext_size)
         {
-            printf("Read only %d from %d\n", valread, size);
+            printf("Read only %d from %d\n", valread, ciphertext_size);
             return -1;
         }
     }
     printf("Employee ciphertexts received...\n");
 
     shutdown(new_socket, 2);
+
+    return ERROR_NONE;
+}
+
+int binary_search_salary(employee_ciphertext* employee_ciphertexts, byte* salary_buf)
+{
+    int employees_count = sizeof(employee_ciphertexts)/sizeof(employee_ciphertexts[0]);
+    int mid_index, res1, res2;
+    ore_ciphertext ctxt1;
+    ore_ciphertext ctxt2;
+    ore_ciphertext ctxt3;
+
+    init_ore_ciphertext(ctxt1, params);
+    init_ore_ciphertext(ctxt2, params);
+    init_ore_ciphertext(ctxt3, params);
+
+    ctxt1->buf = salary_buf;
+
+    mid_index = employees_count / 2;
+    do 
+    {
+        if (mid_index + 1 == employees_count)
+            return mid_index;
+
+        ctxt2->buf = employee_ciphertexts[mid_index].salary_ctxt_buf;
+        ctxt3->buf = employee_ciphertexts[mid_index + 1].salary_ctxt_buf;
+        ore_compare(&res1, ctxt1, ctxt2);
+        ore_compare(&res2, ctxt1, ctxt3);
+        
+        if (mid_index == 0 && res1 == 1)
+            return -1;
+        
+    }
+    while(res1 != -1 && res2 != 1);
+
+    return mid_index;
+}
+
+int range(employee_ciphertext* employee_ciphertexts)
+{
+    int new_socket, valread, min_position, max_position, response_count;
+    byte* range_min_buf;
+    byte* range_max_buf;
+
+    new_socket = init_socket();
+
+    range_min_buf = calloc(sizeof(byte), ciphertext_size);
+    range_max_buf = calloc(sizeof(byte), ciphertext_size);
+
+    valread = read( new_socket , range_min_buf, ciphertext_size);
+    #ifdef DEBUG
+        printf("Bytes read: %d\n", valread);
+        printf("Range min ciphertext: ");
+        for (int j=0; j < ciphertext_size; ++j )
+        {
+            printf("%02x", range_min_buf[j]);
+        }
+        printf("\n");
+    #endif
+    if (valread != ciphertext_size)
+    {
+        printf("Read only %d from %d\n", valread, ciphertext_size);
+        return -1;
+    }
+
+    valread = read( new_socket , range_max_buf, ciphertext_size);
+    #ifdef DEBUG
+        printf("Bytes read: %d\n", valread);
+        printf("Range max ciphertext: ");
+        for (int j=0; j < ciphertext_size; ++j )
+        {
+            printf("%02x", range_max_buf[j]);
+        }
+        printf("\n");
+    #endif
+    if (valread != ciphertext_size)
+    {
+        printf("Read only %d from %d\n", valread, ciphertext_size);
+        return -1;
+    }
+
+    min_position = binary_search_salary(employee_ciphertexts, range_min_buf);
+    max_position = binary_search_salary(employee_ciphertexts, range_min_buf);
+
+    response_count = max_position - min_position;
+
+    send(new_socket , &response_count, sizeof(response_count), 0);
+
+    for(int i = min_position + 1; i < max_position; i++)
+    {
+        send(new_socket , employee_ciphertexts[i].id_ctxt_buf, ciphertext_size, 0);
+        send(new_socket , employee_ciphertexts[i].salary_ctxt_buf, ciphertext_size, 0);
+    }
+
+    free(range_min_buf);
+    free(range_max_buf);
 
     return ERROR_NONE;
 }
@@ -155,6 +254,11 @@ int main()
     printf("Running server setup...\n");
     setup(employee_ciphertexts);
     printf("Server setup finished...\n");
+
+    int nbits = 31;
+    int out_blk_len = ((rand() % (nbits - 2)) + 2);
+    init_ore_params(params, nbits, out_blk_len);
+
     free_employee_ciphetexts(employee_ciphertexts);
     return 0;
 }

@@ -13,6 +13,8 @@ typedef struct {
     unsigned salary;
 } employee;
 
+int ciphertext_size;
+
 int employee_compare(const void *s1, const void *s2)
 {
     employee *e1 = (employee *)s1;
@@ -82,12 +84,12 @@ int setup(ore_secret_key sk, ore_params params, employee* employees, int employe
         printf("Employees count: %d\n", employees_count);
     #endif
     printf("Employees count sent...\n");
+    ciphertext_size = ore_ciphertext_size(params);
     #ifdef DEBUG
         printf("Ciphertext size: %d \n", ore_ciphertext_size(params));
     #endif
-    int size = ore_ciphertext_size(params);
     printf("Sending ciphertext size to server...\n");
-    send(sock , &size, sizeof(size), 0);
+    send(sock , &ciphertext_size, sizeof(ciphertext_size), 0);
     printf("Ciphertext size sent...\n");
 
     printf("Sending ciphertexts...\n");
@@ -99,20 +101,20 @@ int setup(ore_secret_key sk, ore_params params, employee* employees, int employe
 
         #ifdef DEBUG
             printf("ID ciphertext: ");
-            for (int j=0; j < size; ++j )
+            for (int j=0; j < ciphertext_size; ++j )
             {
                 printf("%02x", id_ctxt->buf[j]);
             }
             printf("\n");
             printf("Salary ciphertext: ");
-            for (int j=0; j < size; ++j )
+            for (int j=0; j < ciphertext_size; ++j )
             {
                 printf("%02x", salary_ctxt->buf[j]);
             }
             printf("\n");
         #endif
-        send(sock , id_ctxt->buf, size, 0);
-        send(sock , salary_ctxt->buf, size, 0);
+        send(sock , id_ctxt->buf, ciphertext_size, 0);
+        send(sock , salary_ctxt->buf, ciphertext_size, 0);
     }
 
     printf("Ciphertexts sent...\n");
@@ -120,16 +122,68 @@ int setup(ore_secret_key sk, ore_params params, employee* employees, int employe
     return ERROR_NONE;
 }
 
-// int range(ore_secret_key sk, int range_min, int range_max)
-// {
-//     sock = init_socket();
-//     if (sock == -1) {
-//         printf("ERROR Encountered");
-//         return -1;
-//     }
+int range(ore_secret_key sk, int range_min, int range_max, byte** response, ore_params params)
+{
+    int i, sock, err, valread, response_count;
+    ore_ciphertext range_min_ctxt, range_max_ctxt;
 
-//     return ERROR_NONE;
-// }
+    sock = init_socket();
+    if (sock == -1) {
+        printf("ERROR Encountered");
+        return -1;
+    }
+
+    err = init_ore_ciphertext(range_min_ctxt, params);
+    if (err != ERROR_NONE) {
+        return err;
+    }
+    err = init_ore_ciphertext(range_max_ctxt, params);
+    if (err != ERROR_NONE) {
+        return err;
+    }
+
+    ore_encrypt_ui(range_min_ctxt, sk, range_min);
+    ore_encrypt_ui(range_max_ctxt, sk, range_max);
+
+    send(sock , range_min_ctxt->buf, ciphertext_size, 0);
+    send(sock , range_max_ctxt->buf, ciphertext_size, 0);
+
+    valread = read(sock , &response_count, sizeof(response_count));
+    printf("Response count received...\n");
+    #ifdef DEBUG
+        printf("Bytes read: %d\n", valread);
+        printf("Response count: %d \n", response_count);
+    #endif
+    if (valread != sizeof(response_count))
+    {
+        printf("Read only %d from %lu\n", valread, sizeof(response_count));
+        return -1;
+    }
+
+    response = calloc(sizeof(byte*), response_count);
+
+    for(i = 0; i < response_count; i++)
+    {
+        response[i] = calloc(sizeof(byte), ciphertext_size);
+        valread = read(sock , response[i], sizeof(response[i]));
+        #ifdef DEBUG
+            printf("Bytes read: %d\n", valread);
+            printf("Response: ");
+            for (int j=0; j < ciphertext_size; ++j )
+            {
+                printf("%02x", response[i][j]);
+            }
+            printf("\n");
+        #endif
+        if (valread != sizeof(response[i]))
+        {
+            printf("Read only %d from %lu\n", valread, sizeof(response[i]));
+            return -1;
+        }
+    }
+
+    return ERROR_NONE;
+}
 
 int main()
 {
