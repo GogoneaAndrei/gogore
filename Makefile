@@ -35,5 +35,8 @@ client: client.c $(OBJPATHS)
 server: server.c $(OBJPATHS)
 	$(CC) $(CFLAGS) -o server $< $(LDPATH) $(OBJPATHS) $(LDLIBS)
 
+leak: leak.c $(OBJPATHS)
+	$(CC) $(CFLAGS) -o leak $< $(LDPATH) $(OBJPATHS) $(LDLIBS)
+
 clean:
 	rm -rf $(BUILD) $(TESTS) *~

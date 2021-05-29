@@ -18,6 +18,25 @@ employee_ciphertext* employee_ciphertexts;
 int ciphertext_size, new_socket, employees_count;
 ore_params params;
 
+int readn(int sock, void *av, int length)
+{
+    char *a;
+    int m, t;
+
+    a = av;
+    t = 0;
+    while(t < length){
+        m = read(sock, a + t, length - t);
+        if(m <= 0){
+            if(t == 0)
+                return m;
+            break;
+        }
+        t += m;
+    }
+    return t;
+}
+
 int init_socket()
 {
     int server_fd, new_socket;
@@ -71,7 +90,7 @@ int setup()
 {
     int valread, i;
 
-    valread = read( new_socket , &employees_count, sizeof(employees_count));
+    valread = readn( new_socket , &employees_count, sizeof(employees_count));
     printf("Employees count received...\n");
     #ifdef DEBUG
         printf("Bytes read: %d\n", valread);
@@ -83,7 +102,7 @@ int setup()
         return -1;
     }
 
-    valread = read( new_socket , &ciphertext_size, sizeof(ciphertext_size));
+    valread = readn( new_socket , &ciphertext_size, sizeof(ciphertext_size));
     printf("Ciphertext size received...\n");
     #ifdef DEBUG
         printf("Bytes read: %d\n", valread);
@@ -102,7 +121,7 @@ int setup()
     {
         employee_ciphertexts[i].id_ctxt_buf = calloc(sizeof(byte), ciphertext_size);
         employee_ciphertexts[i].salary_ctxt_buf = calloc(sizeof(byte), ciphertext_size);
-        valread = read( new_socket , employee_ciphertexts[i].id_ctxt_buf, ciphertext_size);
+        valread = readn( new_socket , employee_ciphertexts[i].id_ctxt_buf, ciphertext_size);
         #ifdef DEBUG
             printf("Bytes read: %d\n", valread);
             printf("ID ciphertext: ");
@@ -117,7 +136,7 @@ int setup()
             printf("Read only %d from %d\n", valread, ciphertext_size);
             return -1;
         }
-        valread = read( new_socket , employee_ciphertexts[i].salary_ctxt_buf, ciphertext_size);
+        valread = readn( new_socket , employee_ciphertexts[i].salary_ctxt_buf, ciphertext_size);
         #ifdef DEBUG
             printf("Bytes read: %d\n", valread);
             printf("Salary ciphertext: ");
@@ -220,7 +239,7 @@ int range()
     range_min_buf = calloc(sizeof(byte), ciphertext_size);
     range_max_buf = calloc(sizeof(byte), ciphertext_size);
 
-    valread = read( new_socket , range_min_buf, ciphertext_size);
+    valread = readn( new_socket , range_min_buf, ciphertext_size);
     #ifdef DEBUG
         printf("Bytes read: %d\n", valread);
         printf("Range min ciphertext: ");
@@ -236,7 +255,7 @@ int range()
         return -1;
     }
 
-    valread = read( new_socket , range_max_buf, ciphertext_size);
+    valread = readn( new_socket , range_max_buf, ciphertext_size);
     #ifdef DEBUG
         printf("Bytes read: %d\n", valread);
         printf("Range max ciphertext: ");
@@ -292,7 +311,7 @@ int insert()
     id_buf = calloc(sizeof(byte), ciphertext_size);
     salary_buf = calloc(sizeof(byte), ciphertext_size);
 
-    valread = read( new_socket , id_buf, ciphertext_size);
+    valread = readn( new_socket , id_buf, ciphertext_size);
     #ifdef DEBUG
         printf("Bytes read: %d\n", valread);
         printf("ID ciphertext: ");
@@ -307,7 +326,7 @@ int insert()
         printf("Read only %d from %d\n", valread, ciphertext_size);
         return -1;
     }
-    valread = read( new_socket , salary_buf, ciphertext_size);
+    valread = readn( new_socket , salary_buf, ciphertext_size);
     #ifdef DEBUG
         printf("Bytes read: %d\n", valread);
         printf("Salary ciphertext: ");
@@ -376,7 +395,7 @@ int delete()
     id_buf = calloc(sizeof(byte), ciphertext_size);
     salary_buf = calloc(sizeof(byte), ciphertext_size);
 
-    valread = read( new_socket , id_buf, ciphertext_size);
+    valread = readn( new_socket , id_buf, ciphertext_size);
     #ifdef DEBUG
         printf("Bytes read: %d\n", valread);
         printf("ID ciphertext: ");
@@ -391,7 +410,7 @@ int delete()
         printf("Read only %d from %d\n", valread, ciphertext_size);
         return -1;
     }
-    valread = read( new_socket , salary_buf, ciphertext_size);
+    valread = readn( new_socket , salary_buf, ciphertext_size);
     #ifdef DEBUG
         printf("Bytes read: %d\n", valread);
         printf("Salary ciphertext: ");
@@ -513,8 +532,8 @@ int main()
     while (1)
     {
         memset(command, 0, 80);
-        read( new_socket , &size, sizeof(size));
-        read( new_socket , command, size);
+        readn( new_socket , &size, sizeof(size));
+        readn( new_socket , command, size);
 
         printf("Command received: %s\n", command);
         fflush(stdout);

@@ -6,6 +6,7 @@
 #include <arpa/inet.h> 
 #include <unistd.h> 
 #include <string.h> 
+#include <unistd.h>
 #define PORT 8083
 
 typedef struct {
@@ -14,6 +15,26 @@ typedef struct {
 } employee;
 
 int ciphertext_size, sock;
+FILE * range_file;
+
+int readn(int sock, void *av, int length)
+{
+    char *a;
+    int m, t;
+
+    a = av;
+    t = 0;
+    while(t < length){
+        m = read(sock, a + t, length - t);
+        if(m <= 0){
+            if(t == 0)
+                return m;
+            break;
+        }
+        t += m;
+    }
+    return t;
+}
 
 int employee_compare(const void *s1, const void *s2)
 {
@@ -60,6 +81,9 @@ int setup(ore_secret_key sk, ore_params params, employee* employees, int employe
 {
     int i;
     ore_ciphertext id_ctxt, salary_ctxt;
+    FILE * salary_file;
+
+    salary_file = fopen("salaries", "w");
 
     printf("Generating secret key...\n");
     int err = ore_setup(sk, params);
@@ -112,19 +136,22 @@ int setup(ore_secret_key sk, ore_params params, employee* employees, int employe
             }
             printf("\n");
             printf("Salary: %d; ", employees[i].salary);
+            fprintf(salary_file, "%d ", employees[i].salary);
             printf("Salary ciphertext: ");
             for (int j=0; j < ciphertext_size; ++j )
             {
                 printf("%02x", salary_ctxt->buf[j]);
+                fprintf(salary_file, "%02x", salary_ctxt->buf[j]);
             }
             printf("\n");
+            fprintf(salary_file, "\n");
         #endif
         send(sock , id_ctxt->buf, ciphertext_size, 0);
         send(sock , salary_ctxt->buf, ciphertext_size, 0);
     }
 
     printf("Ciphertexts sent...\n");
-
+    fclose(salary_file);
     return ERROR_NONE;
 }
 
@@ -148,18 +175,23 @@ int range(ore_secret_key sk, int range_min, int range_max, byte** response, ore_
     fflush(stdout);
 
     #ifdef DEBUG
+        fprintf(range_file, "%d %d ", range_min, range_max);
         printf("range_min ciphertext: ");
         for (int j=0; j < ciphertext_size; ++j )
         {
             printf("%02x", range_min_ctxt->buf[j]);
+            fprintf(range_file, "%02x", range_min_ctxt->buf[j]);
         }
         printf("\n");
-        printf("range_min ciphertext: ");
+        fprintf(range_file, " ");
+        printf("range_max ciphertext: ");
         for (int j=0; j < ciphertext_size; ++j )
         {
             printf("%02x", range_max_ctxt->buf[j]);
+            fprintf(range_file, "%02x", range_max_ctxt->buf[j]);
         }
         printf("\n");
+        fprintf(range_file, "\n");
     #endif
     
     send(sock , range_min_ctxt->buf, ciphertext_size, 0);
@@ -168,11 +200,12 @@ int range(ore_secret_key sk, int range_min, int range_max, byte** response, ore_
     printf("Sent encrypted results\n");
     fflush(stdout);
 
-    valread = read(sock , &response_count, sizeof(response_count));
+    valread = readn(sock , &response_count, sizeof(response_count));
     printf("Response count received...\n");
     #ifdef DEBUG
         printf("Bytes read: %d\n", valread);
         printf("Response count: %d \n", response_count);
+        fprintf(range_file, "%d\n", response_count);
     #endif
     if (valread != sizeof(response_count))
     {
@@ -186,21 +219,24 @@ int range(ore_secret_key sk, int range_min, int range_max, byte** response, ore_
     {
         printf("Response element %d: \n", i);
         response[i] = calloc(sizeof(byte), ciphertext_size);
-        valread = read(sock , response[i], ciphertext_size);
+        valread = readn(sock , response[i], ciphertext_size);
         #ifdef DEBUG
             printf("Bytes read: %d\n", valread);
             printf("Response: ");
             for (int j=0; j < ciphertext_size; ++j )
             {
                 printf("%02x", response[i][j]);
+                fprintf(range_file, "%02x", response[i][j]);
             }
             printf("\n");
+            fprintf(range_file, "\n");
         #endif
         if (valread != ciphertext_size)
         {
             printf("Read only %d from %lu\n", valread, sizeof(response[i]));
             return -1;
         }
+
     }
 
     for(int i = 0; i < response_count; i++)
@@ -208,7 +244,6 @@ int range(ore_secret_key sk, int range_min, int range_max, byte** response, ore_
         free(response[i]);
     }
     free(response);
-
 
     return ERROR_NONE;
 }
@@ -300,7 +335,7 @@ void free_employee_ciphetexts(employee* employees)
 int main()
 {
     FILE* fd;
-    int i, size, line_len, employees_count = 0, range_min, range_max;
+    int i, size, line_len, employees_count = 0, range_min, range_max, range_count = 0;
     employee* employees = NULL, new_employee;
     int nbits = 31;
     byte** range_response = NULL;
@@ -325,7 +360,7 @@ int main()
             fscanf(fd, "%d", &employees[i].salary);
             employees[i].id = i;
         }
-        fclose(fd);
+        //fclose(fd);
     }
 
     ore_params params;
@@ -335,6 +370,19 @@ int main()
     printf("Running client setup...\n");
     setup(sk, params, employees, employees_count);
     printf("Client setup finished...\n");
+
+    fscanf(fd, "%d", &range_count);
+    range_file = fopen("ranges2", "w");
+    for(i = 0; i < range_count; i++)
+    {
+        fscanf(fd, "%d %d", &range_min, &range_max);
+        size = 5;
+        send(sock, &size, sizeof(size), 0);
+        send(sock , "RANGE", size, 0);
+        range(sk, range_min, range_max, range_response, params);
+    }
+    fclose(range_file);
+    fclose(fd);
 
     while (1)
     {
